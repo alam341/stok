@@ -2,12 +2,20 @@ const SUPABASE_URL = 'https://keklqxdvlfpjyagtmttk.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtla2xxeGR2bGZwanlhZ3RtdHRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwOTU1NTEsImV4cCI6MjA5MTY3MTU1MX0.qUE2hd57wrQ528-JKrFvElity2DrDdi4xG8Ji67MsP0';
 
 const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: true,
+    storageKey: 'stockku-auth',
+    storage: window.localStorage,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  }
+});
 
 // Auth helpers
 async function getUser() {
-  const { data: { user } } = await db.auth.getUser();
-  return user;
+  const { data: { session } } = await db.auth.getSession();
+  return session?.user || null;
 }
 
 async function getProfile() {
@@ -29,7 +37,7 @@ function formatNumber(n) {
 
 function formatDate(d) {
   if (!d) return '-';
-  return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function showToast(msg, type = 'success') {
