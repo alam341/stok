@@ -47,7 +47,7 @@ async function login() {
   }
 }
 // Redirect if already logged in
-db.auth.getUser().then(({ data: { user } }) => { if (user) window.location.href = 'dashboard.html'; });
+db.auth.getSession().then(({ data: { session } }) => { if (session) window.location.href = 'dashboard.html'; });
 </script>
 </body>
 </html>
