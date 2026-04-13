@@ -1,6 +1,8 @@
-// sidebar.js - inject sidebar into all pages
 async function initSidebar(activePage) {
-  const profile = await getProfile();
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) { window.location.href = 'login.html'; return; }
+
+  const { data: profile } = await db.from('profiles').select('*').eq('id', session.user.id).single();
   if (!profile) { window.location.href = 'login.html'; return; }
 
   const sidebar = document.getElementById('sidebar');
