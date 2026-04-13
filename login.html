@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">S</div>
+      <div style="font-size:22px;font-weight:700">StokKu</div>
+      <div style="font-size:13px;color:#64748b;margin-top:4px">Manajemen Stok Produk</div>
+    </div>
+    <div id="alert"></div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" class="form-input" id="email" placeholder="nama@email.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input type="password" class="form-input" id="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')login()">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="login()" id="btn-login">Masuk</button>
+    <p style="text-align:center;font-size:13px;color:#64748b;margin-top:16px">
+      Belum punya akun? <a href="register.html" style="color:#2563eb;font-weight:500">Daftar</a>
+    </p>
+  </div>
+</div>
+<script src="config.js"></script>
+<script>
+async function login() {
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const btn = document.getElementById('btn-login');
+  const alert = document.getElementById('alert');
+  if (!email || !password) { alert.innerHTML = '<div class="alert alert-error">Email dan password wajib diisi</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Masuk...';
+  const { error } = await db.auth.signInWithPassword({ email, password });
+  if (error) {
+    alert.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+    btn.disabled = false; btn.textContent = 'Masuk';
+  } else {
+    window.location.href = 'dashboard.html';
+  }
+}
+// Redirect if already logged in
+db.auth.getUser().then(({ data: { user } }) => { if (user) window.location.href = 'dashboard.html'; });
+</script>
+</body>
+</html>

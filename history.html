@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Riwayat — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="page-header">
+      <div><div class="page-title">Riwayat Pergerakan Stok</div><div class="page-subtitle" id="sub">Memuat...</div></div>
+      <button class="btn btn-secondary" onclick="exportCSV()">⬇ Export CSV</button>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <div>
+          <label class="form-label">Tipe</label>
+          <select class="form-input" id="f-type" style="width:180px">
+            <option value="">Semua Tipe</option>
+            <option value="in_supplier">Masuk Supplier</option>
+            <option value="in_rts_good">RTS Layak</option>
+            <option value="in_rts_damaged">RTS Rusak</option>
+            <option value="out_packing">Packing Keluar</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Dari Tanggal</label>
+          <input type="date" class="form-input" id="f-from" style="width:160px">
+        </div>
+        <div>
+          <label class="form-label">Sampai</label>
+          <input type="date" class="form-input" id="f-to" style="width:160px">
+        </div>
+        <button class="btn btn-primary" onclick="loadData()">Terapkan</button>
+        <button class="btn btn-secondary" onclick="resetFilter()">Reset</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tanggal</th><th>Produk</th><th>Tipe</th><th style="text-align:right">Jumlah</th><th style="text-align:right">Stok Sebelum</th><th style="text-align:right">Stok Sesudah</th></tr></thead>
+          <tbody id="tbody"><tr><td colspan="6"><div class="loading"><div class="spinner"></div>Memuat...</div></td></tr></tbody>
+        </table>
+      </div>
+      <div id="pagination" style="padding:14px 16px;border-top:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center"></div>
+    </div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="sidebar.js"></script>
+<script>
+let currentPage = 0, pageSize = 30, totalCount = 0, allData = [];
+
+async function loadData(page=0) {
+  currentPage = page;
+  const type = document.getElementById('f-type').value;
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '<tr><td colspan="6"><div class="loading"><div class="spinner"></div></div></td></tr>';
+
+  let q = db.from('stock_movements').select('*,product:products(name,sku,unit)',{count:'exact'}).order('created_at',{ascending:false});
+  if (type) q=q.eq('type',type);
+  if (from) q=q.gte('transaction_date',from);
+  if (to) q=q.lte('transaction_date',to);
+  q = q.range(page*pageSize, page*pageSize+pageSize-1);
+
+  const { data, count } = await q;
+  allData = data||[];
+  totalCount = count||0;
+  document.getElementById('sub').textContent = `${formatNumber(totalCount)} total transaksi`;
+
+  if (!allData.length) { tbody.innerHTML='<tr><td colspan="6"><div class="empty-state">Tidak ada data</div></td></tr>'; renderPagination(); return; }
+  tbody.innerHTML = allData.map(m=>`
+    <tr>
+      <td>${formatDate(m.transaction_date)}</td>
+      <td><div style="font-weight:500">${m.product?.name||'-'}</div><div style="font-size:11.5px;color:#94a3b8">${m.product?.sku||''}</div></td>
+      <td><span class="badge ${MOVEMENT_COLORS[m.type]||'badge-gray'}">${MOVEMENT_LABELS[m.type]||m.type}</span></td>
+      <td style="text-align:right;font-weight:600;color:${m.type==='out_packing'?'#7c3aed':m.type==='in_rts_damaged'?'#dc2626':'#16a34a'}">
+        ${m.type==='out_packing'?'-':m.type==='in_rts_damaged'?'':'+'}${formatNumber(m.quantity)} ${m.product?.unit||''}
+      </td>
+      <td style="text-align:right;color:#94a3b8">${formatNumber(m.stock_before)}</td>
+      <td style="text-align:right;font-weight:500">${formatNumber(m.stock_after)}</td>
+    </tr>`).join('');
+  renderPagination();
+}
+
+function renderPagination() {
+  const totalPages = Math.ceil(totalCount/pageSize);
+  const pg = document.getElementById('pagination');
+  if (totalPages<=1) { pg.innerHTML=''; return; }
+  pg.innerHTML = `
+    <span style="font-size:13px;color:#64748b">Halaman ${currentPage+1} dari ${totalPages}</span>
+    <div style="display:flex;gap:8px">
+      ${currentPage>0?`<button class="btn btn-secondary btn-sm" onclick="loadData(${currentPage-1})">← Sebelumnya</button>`:''}
+      ${currentPage<totalPages-1?`<button class="btn btn-secondary btn-sm" onclick="loadData(${currentPage+1})">Berikutnya →</button>`:''}
+    </div>`;
+}
+
+function resetFilter() {
+  document.getElementById('f-type').value='';
+  document.getElementById('f-from').value='';
+  document.getElementById('f-to').value='';
+  loadData();
+}
+
+async function exportCSV() {
+  const type = document.getElementById('f-type').value;
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  let q = db.from('stock_movements').select('transaction_date,type,quantity,stock_before,stock_after,product:products(name,sku,unit)').order('transaction_date',{ascending:false});
+  if (type) q=q.eq('type',type);
+  if (from) q=q.gte('transaction_date',from);
+  if (to) q=q.lte('transaction_date',to);
+  const { data } = await q.limit(5000);
+  const rows = [['Tanggal','Produk','SKU','Tipe','Jumlah','Satuan','Stok Sebelum','Stok Sesudah']];
+  (data||[]).forEach(m=>rows.push([m.transaction_date,m.product?.name||'',m.product?.sku||'',MOVEMENT_LABELS[m.type]||m.type,m.quantity,m.product?.unit||'',m.stock_before,m.stock_after]));
+  const csv = '\uFEFF'+rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `riwayat_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+}
+
+async function init() {
+  await requireAuth();
+  initSidebar('history');
+  loadData();
+}
+init();
+</script>
+</body>
+</html>

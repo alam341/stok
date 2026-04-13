@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Packing Harian — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Packing Harian</div>
+        <div class="page-subtitle">Catat barang keluar untuk penjualan hari ini</div>
+      </div>
+    </div>
+    <div class="card" style="max-width:860px">
+      <div class="card-body">
+        <div id="alert"></div>
+        <div style="margin-bottom:16px">
+          <label class="form-label">Tanggal Packing</label>
+          <input type="date" class="form-input" id="date" style="max-width:200px">
+        </div>
+        <div id="rows"></div>
+        <button class="btn btn-secondary" onclick="addRow()" style="margin-bottom:20px">+ Tambah Baris</button>
+        <hr class="divider">
+        <button class="btn btn-primary" style="background:#7c3aed" onclick="save()" id="btn-save">Simpan Packing</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="sidebar.js"></script>
+<script>
+let products = [], rows = 0;
+
+async function loadProducts() {
+  const { data } = await db.from('products').select('id,name,sku,unit,current_stock,min_stock,is_active,created_at,updated_at').eq('is_active',true).order('name');
+  products = data||[];
+}
+
+function productOptions() {
+  return products.map(p=>`<option value="${p.id}" data-stock="${p.current_stock}" data-unit="${p.unit}">${p.name} (${p.sku}) — stok: ${p.current_stock} ${p.unit}${p.current_stock===0?' [HABIS]':''}</option>`).join('');
+}
+
+function checkStock(id) {
+  const sel = document.getElementById(`prod-${id}`);
+  const qty = Number(document.getElementById(`qty-${id}`)?.value);
+  const opt = sel.selectedOptions[0];
+  const stock = Number(opt?.dataset.stock||0);
+  const unit = opt?.dataset.unit||'';
+  const info = document.getElementById(`info-${id}`);
+  if (!opt||!opt.value) { info.innerHTML=''; return; }
+  if (qty > stock) {
+    info.innerHTML = `<span style="color:#dc2626;font-size:12px">⚠ Stok tidak cukup (tersedia: ${stock} ${unit})</span>`;
+    document.getElementById(`row-${id}`).style.borderColor='#fecaca';
+  } else {
+    info.innerHTML = `<span style="color:#64748b;font-size:12px">Stok tersedia: ${formatNumber(stock)} ${unit}</span>`;
+    document.getElementById(`row-${id}`).style.borderColor='#e2e8f0';
+  }
+}
+
+function addRow() {
+  const id = rows++;
+  const div = document.createElement('div');
+  div.className='row-item'; div.id=`row-${id}`;
+  div.innerHTML = `
+    <div style="display:grid;grid-template-columns:2.5fr 1fr 1.5fr 1.5fr auto;gap:10px;align-items:end">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Produk</label>
+        <select class="form-input" id="prod-${id}" onchange="checkStock(${id})"><option value="">Pilih produk...</option>${productOptions()}</select>
+        <div id="info-${id}" style="margin-top:4px"></div>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Jumlah</label>
+        <input type="number" class="form-input" id="qty-${id}" value="1" min="1" oninput="checkStock(${id})">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">No. Order</label>
+        <input class="form-input" id="ref-${id}" placeholder="ORD-...">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Catatan</label>
+        <input class="form-input" id="note-${id}" placeholder="opsional">
+      </div>
+      <button onclick="removeRow(${id})" style="background:none;border:1px solid #fecaca;border-radius:6px;color:#dc2626;cursor:pointer;padding:6px 10px;font-size:16px;align-self:end">×</button>
+    </div>`;
+  document.getElementById('rows').appendChild(div);
+}
+
+function removeRow(id) { document.getElementById(`row-${id}`)?.remove(); }
+
+async function save() {
+  const rowEls = document.querySelectorAll('[id^="row-"]');
+  if (!rowEls.length) { document.getElementById('alert').innerHTML='<div class="alert alert-error">Tambahkan minimal 1 produk</div>'; return; }
+  const inserts = [];
+  for (const el of rowEls) {
+    const id = el.id.replace('row-','');
+    const prodId = document.getElementById(`prod-${id}`)?.value;
+    const qty = Number(document.getElementById(`qty-${id}`)?.value);
+    if (!prodId||qty<1) { document.getElementById('alert').innerHTML='<div class="alert alert-error">Lengkapi semua baris</div>'; return; }
+    const opt = document.getElementById(`prod-${id}`).selectedOptions[0];
+    const stock = Number(opt?.dataset.stock||0);
+    if (qty>stock) { document.getElementById('alert').innerHTML='<div class="alert alert-error">Ada produk dengan stok tidak cukup</div>'; return; }
+    inserts.push({ product_id:prodId, quantity:qty, reference_number:document.getElementById(`ref-${id}`).value||null, notes:document.getElementById(`note-${id}`).value||null, transaction_date:document.getElementById('date').value });
+  }
+  const btn = document.getElementById('btn-save');
+  btn.disabled=true; btn.textContent='Menyimpan...';
+  const { error } = await db.from('outgoing_transactions').insert(inserts);
+  btn.disabled=false; btn.textContent='Simpan Packing';
+  if (error) { document.getElementById('alert').innerHTML=`<div class="alert alert-error">${error.message}</div>`; return; }
+  document.getElementById('alert').innerHTML='<div class="alert alert-success">✓ Packing berhasil! Stok sudah berkurang.</div>';
+  document.getElementById('rows').innerHTML=''; rows=0;
+  await loadProducts(); addRow();
+  setTimeout(()=>document.getElementById('alert').innerHTML='',3000);
+}
+
+async function init() {
+  await requireAuth();
+  initSidebar('packing');
+  document.getElementById('date').value = new Date().toISOString().split('T')[0];
+  await loadProducts();
+  addRow();
+}
+init();
+</script>
+</body>
+</html>

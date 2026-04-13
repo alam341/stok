@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Dashboard</div>
+        <div class="page-subtitle">Ringkasan stok & aktivitas hari ini</div>
+      </div>
+    </div>
+
+    <div class="stats-grid" id="stats">
+      <div class="stat-card"><div class="loading"><div class="spinner"></div></div></div>
+      <div class="stat-card"><div class="loading"><div class="spinner"></div></div></div>
+      <div class="stat-card"><div class="loading"><div class="spinner"></div></div></div>
+      <div class="stat-card"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+
+    <div id="low-alert"></div>
+
+    <div class="grid-2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-head">Pergerakan Stok 7 Hari Terakhir</div>
+        <div class="card-body"><canvas id="chart" height="180"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head">Stok Menipis</div>
+        <div class="card-body" id="low-stock"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">Aktivitas Terbaru</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tanggal</th><th>Produk</th><th>Tipe</th><th style="text-align:right">Jumlah</th><th style="text-align:right">Stok</th></tr></thead>
+          <tbody id="recent-body"><tr><td colspan="5"><div class="loading"><div class="spinner"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="sidebar.js"></script>
+<script>
+const today = new Date().toISOString().split('T')[0];
+
+async function loadStats() {
+  const [prod, lowStock, movements] = await Promise.all([
+    db.from('products').select('id', { count: 'exact' }).eq('is_active', true),
+    db.from('products').select('id', { count: 'exact' }).lte('current_stock', 5).eq('is_active', true),
+    db.from('stock_movements').select('type, quantity').eq('transaction_date', today),
+  ]);
+  const mvs = movements.data || [];
+  const todayIn = mvs.filter(m => ['in_supplier','in_rts_good'].includes(m.type)).reduce((a,m)=>a+m.quantity,0);
+  const todayOut = mvs.filter(m => m.type==='out_packing').reduce((a,m)=>a+m.quantity,0);
+  const todayRts = mvs.filter(m => m.type==='in_rts_damaged').reduce((a,m)=>a+m.quantity,0);
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Total Produk <div class="stat-icon" style="background:#eff6ff"><svg viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/></svg></div></div>
+      <div class="stat-val">${formatNumber(prod.count||0)}</div><div class="stat-sub">produk aktif</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Masuk Hari Ini <div class="stat-icon" style="background:#f0fdf4"><svg viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div></div>
+      <div class="stat-val">${formatNumber(todayIn)}</div><div class="stat-sub">unit masuk</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Packing Hari Ini <div class="stat-icon" style="background:#faf5ff"><svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div></div>
+      <div class="stat-val">${formatNumber(todayOut)}</div><div class="stat-sub">unit keluar</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">RTS Rusak <div class="stat-icon" style="background:#fef2f2"><svg viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg></div></div>
+      <div class="stat-val">${formatNumber(todayRts)}</div><div class="stat-sub">tidak layak</div>
+    </div>
+  `;
+
+  if ((lowStock.count||0) > 0) {
+    document.getElementById('low-alert').innerHTML = `
+      <div class="alert alert-warning" style="margin-bottom:16px">
+        ⚠️ <strong>${lowStock.count} produk</strong> stok menipis — segera lakukan pemesanan ke supplier
+      </div>`;
+  }
+}
+
+async function loadChart() {
+  const days = [], labels = [];
+  for (let i=6;i>=0;i--) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    days.push(d.toISOString().split('T')[0]);
+    labels.push(d.toLocaleDateString('id-ID',{weekday:'short',day:'numeric'}));
+  }
+  const { data } = await db.from('stock_movements').select('type,quantity,transaction_date').gte('transaction_date',days[0]).lte('transaction_date',days[6]);
+  const mvs = data||[];
+  const masuk = days.map(d=>mvs.filter(m=>m.transaction_date===d&&['in_supplier','in_rts_good'].includes(m.type)).reduce((a,m)=>a+m.quantity,0));
+  const keluar = days.map(d=>mvs.filter(m=>m.transaction_date===d&&m.type==='out_packing').reduce((a,m)=>a+m.quantity,0));
+  const rts = days.map(d=>mvs.filter(m=>m.transaction_date===d&&m.type==='in_rts_damaged').reduce((a,m)=>a+m.quantity,0));
+
+  new Chart(document.getElementById('chart'), {
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'Masuk',data:masuk,backgroundColor:'#3b82f6',borderRadius:4},
+      {label:'Packing',data:keluar,backgroundColor:'#a855f7',borderRadius:4},
+      {label:'RTS Rusak',data:rts,backgroundColor:'#ef4444',borderRadius:4},
+    ]},
+    options:{responsive:true,plugins:{legend:{labels:{font:{size:12}}}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f1f5f9'}}}}
+  });
+}
+
+async function loadLowStock() {
+  const { data } = await db.from('products').select('name,sku,current_stock').eq('is_active',true).lte('current_stock',5).order('current_stock',{ascending:true}).limit(6);
+  const el = document.getElementById('low-stock');
+  if (!data||data.length===0) { el.innerHTML='<div class="empty-state" style="padding:24px">Semua stok aman ✓</div>'; return; }
+  el.innerHTML = data.map(p=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9">
+      <div style="flex:1"><div style="font-size:13px;font-weight:500">${p.name}</div><div style="font-size:11.5px;color:#94a3b8">${p.sku}</div></div>
+      <span style="font-weight:700;color:${p.current_stock===0?'#dc2626':'#d97706'}">${p.current_stock}</span>
+    </div>`).join('');
+}
+
+async function loadRecent() {
+  const { data } = await db.from('stock_movements').select('*,product:products(name,sku,unit)').order('created_at',{ascending:false}).limit(10);
+  const tbody = document.getElementById('recent-body');
+  if (!data||data.length===0) { tbody.innerHTML='<tr><td colspan="5" class="empty-state">Belum ada aktivitas</td></tr>'; return; }
+  tbody.innerHTML = data.map(m=>`
+    <tr>
+      <td>${formatDate(m.transaction_date)}</td>
+      <td><div style="font-weight:500">${m.product?.name||'-'}</div><div style="font-size:11.5px;color:#94a3b8">${m.product?.sku||''}</div></td>
+      <td><span class="badge ${MOVEMENT_COLORS[m.type]||'badge-gray'}">${MOVEMENT_LABELS[m.type]||m.type}</span></td>
+      <td style="text-align:right;font-weight:600;color:${m.type==='out_packing'?'#7c3aed':m.type==='in_rts_damaged'?'#dc2626':'#16a34a'}">
+        ${m.type==='out_packing'?'-':m.type==='in_rts_damaged'?'':'+'}${formatNumber(m.quantity)}
+      </td>
+      <td style="text-align:right;color:#64748b">${formatNumber(m.stock_after)}</td>
+    </tr>`).join('');
+}
+
+async function init() {
+  await requireAuth();
+  initSidebar('dashboard');
+  loadStats(); loadChart(); loadLowStock(); loadRecent();
+}
+init();
+</script>
+</body>
+</html>

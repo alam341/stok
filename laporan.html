@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laporan — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="page-header">
+      <div><div class="page-title">Laporan</div><div class="page-subtitle">Rekap pergerakan stok per periode</div></div>
+      <button class="btn btn-secondary" onclick="exportCSV()">⬇ Export CSV</button>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <div><label class="form-label">Dari</label><input type="date" class="form-input" id="f-from" style="width:160px"></div>
+        <div><label class="form-label">Sampai</label><input type="date" class="form-input" id="f-to" style="width:160px"></div>
+        <button class="btn btn-primary" onclick="loadData()">Tampilkan</button>
+      </div>
+    </div>
+
+    <div class="stats-grid" id="stats" style="margin-bottom:16px"></div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">Grafik Pergerakan</div>
+      <div class="card-body"><canvas id="chart" height="120"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">Top Produk</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Produk</th><th style="text-align:right;color:#2563eb">Masuk</th><th style="text-align:right;color:#7c3aed">Packing</th><th style="text-align:right;color:#dc2626">RTS Rusak</th><th style="text-align:right">Net</th></tr></thead>
+          <tbody id="top-body"><tr><td colspan="5"><div class="loading"><div class="spinner"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="sidebar.js"></script>
+<script>
+let chartInstance = null;
+
+async function loadData() {
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+
+  const { data } = await db.from('stock_movements').select('transaction_date,type,quantity,product:products(name,sku)').gte('transaction_date',from).lte('transaction_date',to).order('transaction_date',{ascending:true});
+  const mvs = data||[];
+
+  const totalIn = mvs.filter(m=>['in_supplier','in_rts_good'].includes(m.type)).reduce((a,m)=>a+m.quantity,0);
+  const totalOut = mvs.filter(m=>m.type==='out_packing').reduce((a,m)=>a+m.quantity,0);
+  const totalRtsGood = mvs.filter(m=>m.type==='in_rts_good').reduce((a,m)=>a+m.quantity,0);
+  const totalRtsBad = mvs.filter(m=>m.type==='in_rts_damaged').reduce((a,m)=>a+m.quantity,0);
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Total Masuk</div><div class="stat-val">${formatNumber(totalIn)}</div><div class="stat-sub">dari supplier + RTS layak</div></div>
+    <div class="stat-card"><div class="stat-label">Total Packing</div><div class="stat-val">${formatNumber(totalOut)}</div><div class="stat-sub">unit keluar</div></div>
+    <div class="stat-card"><div class="stat-label">RTS Layak</div><div class="stat-val">${formatNumber(totalRtsGood)}</div><div class="stat-sub">masuk ke stok</div></div>
+    <div class="stat-card"><div class="stat-label">RTS Rusak</div><div class="stat-val" style="color:#dc2626">${formatNumber(totalRtsBad)}</div><div class="stat-sub">tidak masuk stok</div></div>`;
+
+  // Chart by day
+  const days = {}, labels = [];
+  mvs.forEach(m=>{ if(!days[m.transaction_date]) days[m.transaction_date]={masuk:0,keluar:0,rts:0}; if(['in_supplier','in_rts_good'].includes(m.type)) days[m.transaction_date].masuk+=m.quantity; if(m.type==='out_packing') days[m.transaction_date].keluar+=m.quantity; if(m.type==='in_rts_damaged') days[m.transaction_date].rts+=m.quantity; });
+  const dateKeys = Object.keys(days).sort();
+  const masukArr = dateKeys.map(d=>days[d].masuk);
+  const keluarArr = dateKeys.map(d=>days[d].keluar);
+  const rtsArr = dateKeys.map(d=>days[d].rts);
+  const dateLabels = dateKeys.map(d=>new Date(d+'T00:00:00').toLocaleDateString('id-ID',{day:'numeric',month:'short'}));
+
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(document.getElementById('chart'), {
+    type:'line',
+    data:{labels:dateLabels,datasets:[
+      {label:'Masuk',data:masukArr,borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,.1)',fill:true,tension:.3,pointRadius:2},
+      {label:'Packing',data:keluarArr,borderColor:'#a855f7',backgroundColor:'rgba(168,85,247,.1)',fill:true,tension:.3,pointRadius:2},
+      {label:'RTS Rusak',data:rtsArr,borderColor:'#ef4444',fill:false,tension:.3,pointRadius:2,borderDash:[4,2]},
+    ]},
+    options:{responsive:true,plugins:{legend:{labels:{font:{size:12}}}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f1f5f9'}}}}
+  });
+
+  // Top products
+  const byProd = {};
+  mvs.forEach(m=>{ const key=m.product?.sku||'?'; if(!byProd[key]) byProd[key]={name:m.product?.name||'-',sku:key,masuk:0,keluar:0,rts:0}; if(['in_supplier','in_rts_good'].includes(m.type)) byProd[key].masuk+=m.quantity; if(m.type==='out_packing') byProd[key].keluar+=m.quantity; if(m.type==='in_rts_damaged') byProd[key].rts+=m.quantity; });
+  const top = Object.values(byProd).sort((a,b)=>(b.masuk+b.keluar)-(a.masuk+a.keluar)).slice(0,10);
+  document.getElementById('top-body').innerHTML = top.length===0
+    ? '<tr><td colspan="5"><div class="empty-state">Tidak ada data</div></td></tr>'
+    : top.map(p=>`<tr>
+        <td><div style="font-weight:500">${p.name}</div><div style="font-size:11.5px;color:#94a3b8">${p.sku}</div></td>
+        <td style="text-align:right;color:#2563eb;font-weight:500">+${formatNumber(p.masuk)}</td>
+        <td style="text-align:right;color:#7c3aed;font-weight:500">-${formatNumber(p.keluar)}</td>
+        <td style="text-align:right;color:#dc2626">${formatNumber(p.rts)}</td>
+        <td style="text-align:right;font-weight:600;color:${p.masuk-p.keluar>=0?'#1e293b':'#dc2626'}">${p.masuk-p.keluar>=0?'+':''}${formatNumber(p.masuk-p.keluar)}</td>
+      </tr>`).join('');
+}
+
+async function exportCSV() {
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  const { data } = await db.from('stock_movements').select('transaction_date,type,quantity,stock_before,stock_after,product:products(name,sku,unit)').gte('transaction_date',from).lte('transaction_date',to).order('transaction_date').limit(5000);
+  const rows = [['Tanggal','Produk','SKU','Tipe','Jumlah','Stok Sebelum','Stok Sesudah']];
+  (data||[]).forEach(m=>rows.push([m.transaction_date,m.product?.name||'',m.product?.sku||'',MOVEMENT_LABELS[m.type]||m.type,m.quantity,m.stock_before,m.stock_after]));
+  const csv = '\uFEFF'+rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+  const a = document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`laporan_${from}_${to}.csv`; a.click();
+}
+
+async function init() {
+  await requireAuth();
+  initSidebar('laporan');
+  const to = new Date().toISOString().split('T')[0];
+  const from = new Date(); from.setDate(from.getDate()-29);
+  document.getElementById('f-from').value = from.toISOString().split('T')[0];
+  document.getElementById('f-to').value = to;
+  loadData();
+}
+init();
+</script>
+</body>
+</html>

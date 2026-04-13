@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daftar — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">S</div>
+      <div style="font-size:22px;font-weight:700">StokKu</div>
+      <div style="font-size:13px;color:#64748b;margin-top:4px">Buat akun baru</div>
+    </div>
+    <div id="alert"></div>
+    <div class="form-group">
+      <label class="form-label">Nama Lengkap</label>
+      <input type="text" class="form-input" id="name" placeholder="Nama kamu">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" class="form-input" id="email" placeholder="nama@email.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input type="password" class="form-input" id="password" placeholder="Min. 6 karakter">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Konfirmasi Password</label>
+      <input type="password" class="form-input" id="confirm" placeholder="Ulangi password">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="register()" id="btn-reg">Daftar</button>
+    <p style="text-align:center;font-size:13px;color:#64748b;margin-top:16px">
+      Sudah punya akun? <a href="login.html" style="color:#2563eb;font-weight:500">Masuk</a>
+    </p>
+  </div>
+</div>
+<script src="config.js"></script>
+<script>
+async function register() {
+  const name = document.getElementById('name').value;
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const confirm = document.getElementById('confirm').value;
+  const alertEl = document.getElementById('alert');
+  const btn = document.getElementById('btn-reg');
+  if (!name || !email || !password) { alertEl.innerHTML = '<div class="alert alert-error">Semua field wajib diisi</div>'; return; }
+  if (password !== confirm) { alertEl.innerHTML = '<div class="alert alert-error">Password tidak cocok</div>'; return; }
+  if (password.length < 6) { alertEl.innerHTML = '<div class="alert alert-error">Password minimal 6 karakter</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Mendaftar...';
+  const { error } = await db.auth.signUp({ email, password, options: { data: { full_name: name, role: 'staff' } } });
+  if (error) {
+    alertEl.innerHTML = `<div class="alert alert-error">${error.message}</div>`;
+    btn.disabled = false; btn.textContent = 'Daftar';
+  } else {
+    alertEl.innerHTML = '<div class="alert alert-success">Pendaftaran berhasil! Cek email untuk verifikasi lalu login.</div>';
+    btn.disabled = true;
+    setTimeout(() => window.location.href = 'login.html', 3000);
+  }
+}
+</script>
+</body>
+</html>

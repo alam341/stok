@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Produk — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="page-header">
+      <div><div class="page-title">Produk</div><div class="page-subtitle" id="sub">Memuat...</div></div>
+      <button class="btn btn-primary" onclick="openModal()">+ Tambah Produk</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:12px 16px">
+        <input class="form-input" style="max-width:280px" placeholder="🔍 Cari nama atau SKU..." oninput="filterProducts(this.value)" id="search">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Produk</th><th>Kategori</th><th style="text-align:right">Stok</th><th style="text-align:right">Min</th><th>Status</th><th></th></tr></thead>
+          <tbody id="tbody"><tr><td colspan="6"><div class="loading"><div class="spinner"></div>Memuat...</div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;display:none">
+  <div style="background:white;border-radius:14px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h3 id="modal-title" style="font-size:16px;font-weight:600">Tambah Produk</h3>
+      <button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8">×</button>
+    </div>
+    <div id="modal-alert"></div>
+    <div class="grid-2">
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Nama Produk *</label>
+        <input class="form-input" id="f-name" placeholder="Kaos Polos Premium">
+      </div>
+      <div class="form-group">
+        <label class="form-label">SKU *</label>
+        <input class="form-input" id="f-sku" placeholder="KAO-001" style="text-transform:uppercase">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Kategori</label>
+        <input class="form-input" id="f-cat" placeholder="Pakaian, Aksesoris...">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Satuan</label>
+        <select class="form-input" id="f-unit">
+          <option>pcs</option><option>lusin</option><option>box</option><option>kg</option><option>liter</option><option>meter</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Min. Stok Alert</label>
+        <input type="number" class="form-input" id="f-min" value="0" min="0">
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Harga Jual (opsional)</label>
+        <input type="number" class="form-input" id="f-price" placeholder="0" min="0">
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-secondary" onclick="closeModal()">Batal</button>
+      <button class="btn btn-primary" onclick="saveProduct()" id="btn-save">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="sidebar.js"></script>
+<script>
+let allProducts = [], editingId = null;
+
+async function loadProducts() {
+  const { data } = await db.from('products').select('*').order('name');
+  allProducts = data || [];
+  document.getElementById('sub').textContent = `${allProducts.length} produk terdaftar`;
+  renderTable(allProducts);
+}
+
+function renderTable(list) {
+  const tbody = document.getElementById('tbody');
+  if (!list.length) { tbody.innerHTML='<tr><td colspan="6"><div class="empty-state">Belum ada produk</div></td></tr>'; return; }
+  tbody.innerHTML = list.map(p => `
+    <tr>
+      <td><div style="font-weight:500">${p.name}</div><div style="font-size:11.5px;color:#94a3b8">${p.sku}</div></td>
+      <td>${p.category||'-'}</td>
+      <td style="text-align:right">
+        <span style="font-weight:600;color:${p.current_stock<=p.min_stock?'#d97706':'#1e293b'}">${formatNumber(p.current_stock)}</span>
+        <span style="font-size:11.5px;color:#94a3b8"> ${p.unit}</span>
+        ${p.current_stock<=p.min_stock?'<span style="font-size:11px;color:#d97706"> ⚠</span>':''}
+      </td>
+      <td style="text-align:right;color:#94a3b8">${formatNumber(p.min_stock)}</td>
+      <td><span class="badge ${p.is_active?'badge-green':'badge-gray'}">${p.is_active?'Aktif':'Nonaktif'}</span></td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="editProduct('${p.id}')">Edit</button>
+      </td>
+    </tr>`).join('');
+}
+
+function filterProducts(q) {
+  const filtered = allProducts.filter(p => p.name.toLowerCase().includes(q.toLowerCase()) || p.sku.toLowerCase().includes(q.toLowerCase()));
+  renderTable(filtered);
+}
+
+function openModal(id=null) {
+  editingId = id;
+  document.getElementById('modal-title').textContent = id ? 'Edit Produk' : 'Tambah Produk';
+  document.getElementById('modal-alert').innerHTML = '';
+  if (!id) { ['f-name','f-sku','f-cat','f-price'].forEach(x=>document.getElementById(x).value=''); document.getElementById('f-min').value=0; }
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function editProduct(id) {
+  const p = allProducts.find(x=>x.id===id);
+  if (!p) return;
+  openModal(id);
+  document.getElementById('f-name').value = p.name;
+  document.getElementById('f-sku').value = p.sku;
+  document.getElementById('f-cat').value = p.category||'';
+  document.getElementById('f-unit').value = p.unit;
+  document.getElementById('f-min').value = p.min_stock;
+  document.getElementById('f-price').value = p.price||'';
+}
+
+function closeModal() { document.getElementById('modal').style.display='none'; }
+
+async function saveProduct() {
+  const name = document.getElementById('f-name').value.trim();
+  const sku = document.getElementById('f-sku').value.trim().toUpperCase();
+  const alertEl = document.getElementById('modal-alert');
+  const btn = document.getElementById('btn-save');
+  if (!name||!sku) { alertEl.innerHTML='<div class="alert alert-error">Nama dan SKU wajib diisi</div>'; return; }
+  btn.disabled=true; btn.textContent='Menyimpan...';
+  const payload = { name, sku, category: document.getElementById('f-cat').value||null, unit: document.getElementById('f-unit').value, min_stock: Number(document.getElementById('f-min').value)||0, price: document.getElementById('f-price').value||null };
+  const { error } = editingId
+    ? await db.from('products').update({...payload,updated_at:new Date().toISOString()}).eq('id',editingId)
+    : await db.from('products').insert({...payload,current_stock:0});
+  btn.disabled=false; btn.textContent='Simpan';
+  if (error) { alertEl.innerHTML=`<div class="alert alert-error">${error.message}</div>`; return; }
+  showToast(editingId?'Produk diperbarui!':'Produk ditambahkan!');
+  closeModal(); loadProducts();
+}
+
+async function init() {
+  await requireAuth();
+  initSidebar('products');
+  loadProducts();
+}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTS — StokKu</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Barang Masuk — RTS</div>
+        <div class="page-subtitle">Return To Sender — barang yang kembali dari pembeli</div>
+      </div>
+    </div>
+    <div class="alert alert-info" style="max-width:860px;margin-bottom:16px">
+      ℹ️ <strong>Layak Jual</strong> → stok bertambah. &nbsp;<strong>Rusak</strong> → dicatat tapi stok tidak bertambah.
+    </div>
+    <div class="card" style="max-width:860px">
+      <div class="card-body">
+        <div id="alert"></div>
+        <div style="margin-bottom:16px">
+          <label class="form-label">Tanggal RTS</label>
+          <input type="date" class="form-input" id="date" style="max-width:200px">
+        </div>
+        <div id="rows"></div>
+        <button class="btn btn-secondary" onclick="addRow()" style="margin-bottom:20px">+ Tambah Baris</button>
+        <hr class="divider">
+        <button class="btn btn-primary" onclick="save()" id="btn-save">Simpan Data RTS</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="sidebar.js"></script>
+<script>
+let products = [], rows = 0;
+
+async function loadProducts() {
+  const { data } = await db.from('products').select('id,name,sku,unit,current_stock').eq('is_active',true).order('name');
+  products = data||[];
+}
+
+function productOptions() {
+  return products.map(p=>`<option value="${p.id}">${p.name} (${p.sku})</option>`).join('');
+}
+
+function updateRowStyle(id) {
+  const cond = document.getElementById(`cond-${id}`)?.value;
+  const row = document.getElementById(`row-${id}`);
+  if (row) { row.className = `row-item ${cond==='good'?'good':cond==='damaged'?'damaged':''}`; }
+}
+
+function addRow() {
+  const id = rows++;
+  const div = document.createElement('div');
+  div.className = 'row-item good'; div.id = `row-${id}`;
+  div.innerHTML = `
+    <div style="display:grid;grid-template-columns:2fr 1fr 1.5fr 1.5fr 1.5fr auto;gap:10px;align-items:end">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Produk</label>
+        <select class="form-input" id="prod-${id}"><option value="">Pilih produk...</option>${productOptions()}</select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Jumlah</label>
+        <input type="number" class="form-input" id="qty-${id}" value="1" min="1">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Kondisi</label>
+        <select class="form-input" id="cond-${id}" onchange="updateRowStyle(${id})">
+          <option value="good">✓ Layak Jual</option>
+          <option value="damaged">✗ Rusak</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">No. Resi</label>
+        <input class="form-input" id="ref-${id}" placeholder="opsional">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Catatan</label>
+        <input class="form-input" id="note-${id}" placeholder="opsional">
+      </div>
+      <button onclick="removeRow(${id})" style="background:none;border:1px solid #fecaca;border-radius:6px;color:#dc2626;cursor:pointer;padding:6px 10px;font-size:16px;align-self:end">×</button>
+    </div>`;
+  document.getElementById('rows').appendChild(div);
+}
+
+function removeRow(id) { document.getElementById(`row-${id}`)?.remove(); }
+
+async function save() {
+  const rowEls = document.querySelectorAll('[id^="row-"]');
+  if (!rowEls.length) { document.getElementById('alert').innerHTML='<div class="alert alert-error">Tambahkan minimal 1 produk</div>'; return; }
+  const inserts = [];
+  for (const el of rowEls) {
+    const id = el.id.replace('row-','');
+    const prodId = document.getElementById(`prod-${id}`)?.value;
+    const qty = Number(document.getElementById(`qty-${id}`)?.value);
+    if (!prodId||qty<1) { document.getElementById('alert').innerHTML='<div class="alert alert-error">Lengkapi semua baris</div>'; return; }
+    inserts.push({ product_id:prodId, source:'rts', rts_condition:document.getElementById(`cond-${id}`).value, quantity:qty, reference_number:document.getElementById(`ref-${id}`).value||null, notes:document.getElementById(`note-${id}`).value||null, transaction_date:document.getElementById('date').value });
+  }
+  const btn = document.getElementById('btn-save');
+  btn.disabled=true; btn.textContent='Menyimpan...';
+  const { error } = await db.from('incoming_transactions').insert(inserts);
+  btn.disabled=false; btn.textContent='Simpan Data RTS';
+  if (error) { document.getElementById('alert').innerHTML=`<div class="alert alert-error">${error.message}</div>`; return; }
+  document.getElementById('alert').innerHTML='<div class="alert alert-success">✓ Berhasil dicatat!</div>';
+  document.getElementById('rows').innerHTML=''; rows=0; addRow();
+  setTimeout(()=>document.getElementById('alert').innerHTML='',3000);
+}
+
+async function init() {
+  await requireAuth();
+  initSidebar('rts');
+  document.getElementById('date').value = new Date().toISOString().split('T')[0];
+  await loadProducts();
+  addRow();
+}
+init();
+</script>
+</body>
+</html>
