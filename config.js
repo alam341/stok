@@ -8,14 +8,22 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
     storageKey: 'stockku-auth',
     storage: window.localStorage,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
   }
 });
 
-// Auth helpers
 async function getUser() {
-  const { data: { session } } = await db.auth.getSession();
-  return session?.user || null;
+  // Tunggu session ready dari localStorage
+  return new Promise((resolve) => {
+    db.auth.onAuthStateChange((event, session) => {
+      resolve(session?.user || null);
+    });
+    // Fallback jika onAuthStateChange tidak trigger
+    setTimeout(async () => {
+      const { data: { session } } = await db.auth.getSession();
+      resolve(session?.user || null);
+    }, 500);
+  });
 }
 
 async function getProfile() {
@@ -26,9 +34,12 @@ async function getProfile() {
 }
 
 async function requireAuth() {
-  const user = await getUser();
-  if (!user) { window.location.href = 'login.html'; return null; }
-  return user;
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) {
+    window.location.href = 'login.html';
+    return null;
+  }
+  return session.user;
 }
 
 function formatNumber(n) {
